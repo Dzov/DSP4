@@ -70,8 +70,10 @@ def get_linear_regression_scores(X_train, y_train, X_test, y_test):
 
     train_score = cross_val_score(model, X_train, y_train, cv=5).mean()
     test_score = cross_val_score(model, X_test, y_test, cv=5).mean()
-    print("Train score: ", train_score)
-    print("Test score: ", test_score)
+    print("Train R2 score: ", train_score)
+    print("Train RMSE score: ", np.sqrt(-(cross_val_score(model, X_train, y_train, cv=5, scoring='neg_mean_squared_error').mean())))
+    print("Test R2 score: ", test_score)
+    print("Test RMSE score: ", np.sqrt(-(cross_val_score(model, X_test, y_test, cv=5, scoring='neg_mean_squared_error').mean())))
     
 def apply_custom_encoder(X_train, X_test, data):
     encoder = CustomOneHotEncoder()
@@ -234,8 +236,8 @@ def build_pipeline(model, selector=None):
 def grid_search(X, y, model, params, comparison_df, selector=None):
     scoring = {
         "r2": make_scorer(r2_score),
-        "neg_mean_squared_error": make_scorer(mean_squared_error),
-        "neg_mean_absolute_error": make_scorer(mean_absolute_error),
+        "mean_squared_error": make_scorer(mean_squared_error),
+        "mean_absolute_error": make_scorer(mean_absolute_error),
     }
     start = time.time()
 
@@ -244,25 +246,60 @@ def grid_search(X, y, model, params, comparison_df, selector=None):
         params,
         cv=5,
         scoring=scoring,
-        refit="neg_mean_squared_error",
+        refit="mean_squared_error",
     )
     grid.fit(X, y)
-
     elapsed_time = time.time() - start
     results = {
         "Model": str(model),
         "Selector": str(selector),
-        "Mean R2": grid.cv_results_["mean_test_r2"].mean(),
-        "Mean MAE": (grid.cv_results_["mean_test_neg_mean_absolute_error"].mean()),
-        "Mean RMSE": (
-            np.sqrt((grid.cv_results_["mean_test_neg_mean_squared_error"].mean()))
+        "Mean R2": round(grid.cv_results_["mean_test_r2"][0], 2),
+        "Mean MAE": round((grid.cv_results_["mean_test_mean_absolute_error"][0]), 4),
+        "Mean RMSE": round(
+            (np.sqrt((grid.cv_results_["mean_test_mean_squared_error"][0]))), 4
         ),
         "Best params": str(grid.best_params_),
-        "Mean Fit Time": grid.cv_results_["mean_fit_time"].mean(),
-        "Runtime": elapsed_time,
+        "Mean Fit Time": round(grid.cv_results_["mean_fit_time"][0], 2),
+        "Runtime": round(elapsed_time, 2),
     }
 
     results = pd.DataFrame(results, index=[0])
-    comparison_df = pd.concat([comparison_df, results], ignore_index=True)
+    comparison_df = pd.concat([comparison_df, results], ignore_index=True).sort_values(
+        by="Mean RMSE"
+    )
     display(comparison_df)
     return comparison_df
+
+def plot_predictions(y_test, predictions):
+    actual_values = np.power(10, y_test) - 1
+    predicted_values = np.power(10, predictions) - 1
+    fig, axes = plt.subplots(1, 2, figsize=(15, 4))
+
+    axes[0].scatter(y_test, predictions, label="Predictions")
+    axes[0].plot(
+        [min(y_test), max(y_test)],
+        [min(y_test), max(y_test)],
+        color="red",
+        linestyle="--",
+        label="Ideal Model",
+    )
+    axes[0].set_xlabel("Actual (Log)")
+    axes[0].set_ylabel("Predicted (Log)")
+    axes[0].set_title("Predictions vs Actual Energy Use Log Values")
+    axes[0].legend()
+
+    axes[1].scatter(actual_values, predicted_values, label="Predictions")
+    axes[1].plot(
+        [min(actual_values), max(actual_values)],
+        [min(actual_values), max(actual_values)],
+        color="red",
+        linestyle="--",
+        label="Ideal Model",
+    )
+    axes[1].set_xlabel("Actual")
+    axes[1].set_ylabel("Predicted")
+    axes[1].set_title("Predictions vs Actual Energy Use Values")
+    axes[1].legend()
+
+    plt.tight_layout()
+    plt.show()
