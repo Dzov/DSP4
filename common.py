@@ -33,6 +33,10 @@ from sklearn.compose import make_column_transformer, make_column_selector
 import re
 
 
+def split(X, y):
+    return train_test_split(X, y, test_size=0.2, random_state=42)
+
+
 class CustomOneHotEncoder(BaseEstimator, TransformerMixin):
     def __init__(self):
         self.unique_categories = [
@@ -63,7 +67,8 @@ class CustomOneHotEncoder(BaseEstimator, TransformerMixin):
             categorized_properties = grouped[self.unique_categories]
 
         return np.array(categorized_properties.applymap(lambda x: 1 if x > 1 else x))
-    
+
+
 def get_linear_regression_scores(X_train, y_train, X_test, y_test):
     model = LinearRegression()
     model = model.fit(X_train, y_train)
@@ -71,16 +76,35 @@ def get_linear_regression_scores(X_train, y_train, X_test, y_test):
     train_score = cross_val_score(model, X_train, y_train, cv=5).mean()
     test_score = cross_val_score(model, X_test, y_test, cv=5).mean()
     print("Train R2 score: ", train_score)
-    print("Train RMSE score: ", np.sqrt(-(cross_val_score(model, X_train, y_train, cv=5, scoring='neg_mean_squared_error').mean())))
+    print(
+        "Train RMSE score: ",
+        np.sqrt(
+            -(
+                cross_val_score(
+                    model, X_train, y_train, cv=5, scoring="neg_mean_squared_error"
+                ).mean()
+            )
+        ),
+    )
     print("Test R2 score: ", test_score)
-    print("Test RMSE score: ", np.sqrt(-(cross_val_score(model, X_test, y_test, cv=5, scoring='neg_mean_squared_error').mean())))
-    
+    print(
+        "Test RMSE score: ",
+        np.sqrt(
+            -(
+                cross_val_score(
+                    model, X_test, y_test, cv=5, scoring="neg_mean_squared_error"
+                ).mean()
+            )
+        ),
+    )
+
+
 def apply_custom_encoder(X_train, X_test, data):
     encoder = CustomOneHotEncoder()
     encoded_matrix = encoder.fit_transform(
         X_train[data.select_dtypes(exclude=np.number).columns]
     )
-    labels = [category for category in encoder.unique_categories ]
+    labels = [category for category in encoder.unique_categories]
 
     df = pd.DataFrame(encoded_matrix, columns=labels)
     X_train = X_train.reset_index()
@@ -99,7 +123,7 @@ def apply_custom_encoder(X_train, X_test, data):
     encoded_matrix = encoder.transform(
         X_test[data.select_dtypes(exclude=np.number).columns]
     )
-    labels = [category for category in encoder.unique_categories ]
+    labels = [category for category in encoder.unique_categories]
 
     df = pd.DataFrame(encoded_matrix, columns=labels)
     X_test = X_test.reset_index()
@@ -116,6 +140,7 @@ def apply_custom_encoder(X_train, X_test, data):
     )
 
     return X_train, X_test
+
 
 def apply_onehot_encoder(X_train, X_test, data):
     encoder = OneHotEncoder()
@@ -160,19 +185,24 @@ def apply_onehot_encoder(X_train, X_test, data):
         ],
         inplace=True,
     )
-    
+
     return X_train, X_test
+
 
 def get_preprocessor(name):
     categorical_features = make_column_selector(dtype_include=object)
 
     preprocessors = {
-        "onehot_encoder": (OneHotEncoder(handle_unknown="ignore", sparse_output=False),categorical_features,),
-        "custom_onehot" : (CustomOneHotEncoder(), categorical_features),
-        "target_encoder" : (TargetEncoder(), categorical_features)
+        "onehot_encoder": (
+            OneHotEncoder(handle_unknown="ignore", sparse_output=False),
+            categorical_features,
+        ),
+        "custom_onehot": (CustomOneHotEncoder(), categorical_features),
+        "target_encoder": (TargetEncoder(), categorical_features),
     }
 
     return preprocessors.get(name)
+
 
 def compare_pipelines(X, y, model):
     pipelines = {}
@@ -208,7 +238,7 @@ def compare_pipelines(X, y, model):
     ax = sns.barplot(x=scores["R2"], y=scores["Pipleline Steps"])
     for p in ax.patches:
         ax.annotate(
-            format(p.get_width(), ".2f"),  # Use get_width() for switched axes
+            format(p.get_width(), ".2f"),
             (
                 p.get_x() + p.get_width() / 1.1,
                 p.get_y() + p.get_height(),
@@ -219,28 +249,35 @@ def compare_pipelines(X, y, model):
         )
     plt.show()
 
+
 def build_pipeline(model, selector=None):
     if selector:
         return make_pipeline(
-            make_column_transformer(get_preprocessor("onehot_encoder"), remainder="passthrough"),
+            make_column_transformer(
+                get_preprocessor("onehot_encoder"), remainder="passthrough"
+            ),
             RobustScaler(),
             selector,
             model,
         )
     return make_pipeline(
-        make_column_transformer(get_preprocessor("onehot_encoder"), remainder="passthrough"),
+        make_column_transformer(
+            get_preprocessor("onehot_encoder"), remainder="passthrough"
+        ),
         RobustScaler(),
         model,
     )
 
+
 def grid_search(X, y, model, params, comparison_df, selector=None):
+    (X_train, X_test, y_train, y_test) = split(X, y)
     scoring = {
         "r2": make_scorer(r2_score),
         "mean_squared_error": make_scorer(mean_squared_error),
         "mean_absolute_error": make_scorer(mean_absolute_error),
     }
-    start = time.time()
 
+    start = time.time()
     grid = GridSearchCV(
         build_pipeline(model, selector),
         params,
@@ -248,27 +285,33 @@ def grid_search(X, y, model, params, comparison_df, selector=None):
         scoring=scoring,
         refit="mean_squared_error",
     )
-    grid.fit(X, y)
+    grid.fit(X_train, y_train)
+    y_predicted = grid.predict(X_test)
     elapsed_time = time.time() - start
+
     results = {
         "Model": str(model),
         "Selector": str(selector),
-        "Mean R2": round(grid.cv_results_["mean_test_r2"][0], 2),
-        "Mean MAE": round((grid.cv_results_["mean_test_mean_absolute_error"][0]), 4),
-        "Mean RMSE": round(
-            (np.sqrt((grid.cv_results_["mean_test_mean_squared_error"][0]))), 4
+        "Test RMSE": round(np.sqrt(mean_squared_error(y_test, y_predicted)), 4),
+        "Train Mean R2": round(grid.cv_results_["mean_test_r2"].mean(), 2),
+        "Train Mean MAE": round(
+            (grid.cv_results_["mean_test_mean_absolute_error"].mean()), 4
+        ),
+        "Train Mean RMSE": round(
+            (np.sqrt((grid.cv_results_["mean_test_mean_squared_error"].mean()))), 4
         ),
         "Best params": str(grid.best_params_),
-        "Mean Fit Time": round(grid.cv_results_["mean_fit_time"][0], 2),
+        "Mean Fit Time": round(grid.cv_results_["mean_fit_time"].mean(), 2),
         "Runtime": round(elapsed_time, 2),
     }
 
-    results = pd.DataFrame(results, index=[0])
-    comparison_df = pd.concat([comparison_df, results], ignore_index=True).sort_values(
-        by="Mean RMSE"
-    )
+    comparison_df = pd.concat(
+        [comparison_df, pd.DataFrame(results, index=[0])], ignore_index=True
+    ).sort_values(by="Test RMSE")
+
     display(comparison_df)
     return comparison_df
+
 
 def plot_predictions(y_test, predictions):
     actual_values = np.power(10, y_test) - 1
