@@ -271,10 +271,14 @@ def build_pipeline(model, selector=None):
 
 def grid_search(X, y, model, params, comparison_df, selector=None):
     (X_train, X_test, y_train, y_test) = split(X, y)
+
+    def rmse(y_true, y_pred):
+        return np.sqrt(mean_squared_error(y_true, y_pred))
+
     scoring = {
         "r2": make_scorer(r2_score),
-        "mean_squared_error": make_scorer(mean_squared_error),
-        "mean_absolute_error": make_scorer(mean_absolute_error),
+        "rmse": make_scorer(rmse),
+        "mae": make_scorer(mean_absolute_error),
     }
 
     start = time.time()
@@ -283,23 +287,26 @@ def grid_search(X, y, model, params, comparison_df, selector=None):
         params,
         cv=5,
         scoring=scoring,
-        refit="mean_squared_error",
+        refit="rmse",
     )
     grid.fit(X_train, y_train)
-    y_predicted = grid.predict(X_test)
+    y_pred_log = grid.predict(X_test)
     elapsed_time = time.time() - start
+
+    y_true = np.power(10, y_test) - 1
+    y_pred = np.power(10, y_pred_log) - 1
 
     results = {
         "Model": str(model),
         "Selector": str(selector),
-        "Test RMSE": round(np.sqrt(mean_squared_error(y_test, y_predicted)), 4),
+        "Test RMSE": round(rmse(y_true, y_pred), 4),
+        "Test RMSE (Log)": round(rmse(y_test, y_pred_log), 4),
+        "Test R2": round(r2_score(y_test, y_pred_log), 2),
         "Train Mean R2": round(grid.cv_results_["mean_test_r2"].mean(), 2),
-        "Train Mean MAE": round(
-            (grid.cv_results_["mean_test_mean_absolute_error"].mean()), 4
-        ),
         "Train Mean RMSE": round(
-            (np.sqrt((grid.cv_results_["mean_test_mean_squared_error"].mean()))), 4
+            (np.sqrt((grid.cv_results_["mean_test_rmse"].mean()))), 4
         ),
+        "Train Mean MAE": round((grid.cv_results_["mean_test_mae"].mean()), 4),
         "Best params": str(grid.best_params_),
         "Mean Fit Time": round(grid.cv_results_["mean_fit_time"].mean(), 2),
         "Runtime": round(elapsed_time, 2),
